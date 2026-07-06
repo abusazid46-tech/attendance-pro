@@ -1,0 +1,392 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum RoleName {
+  SUPER_ADMIN
+  ADMIN
+  FACULTY
+  STUDENT
+  PARENT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  LEAVE
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  MORE_INFO_REQUIRED
+}
+
+enum NotificationType {
+  ATTENDANCE_SUBMITTED
+  ATTENDANCE_UPDATED
+  LOW_ATTENDANCE_WARNING
+  ADMIN_BROADCAST
+}
+
+enum ReportType {
+  INDIVIDUAL_STUDENT
+  SUBJECT
+  SEMESTER
+  MONTHLY
+  DEFAULTER
+  EXAM_ELIGIBILITY
+  TEACHING_DIARY
+}
+
+enum ReportFormat {
+  PDF
+  EXCEL
+  CSV
+}
+
+enum BackupTarget {
+  GOOGLE_DRIVE
+  LOCAL_STORAGE
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        RoleName @unique
+  permissions String[]
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id                 String          @id @default(cuid())
+  email              String          @unique
+  mobileNumber       String?         @unique
+  passwordHash       String
+  fullName           String
+  avatarUrl          String?
+  roleId             String
+  role               Role            @relation(fields: [roleId], references: [id])
+  isActive           Boolean         @default(true)
+  refreshTokenHash   String?
+  passwordResetToken String?
+  resetTokenExpiry   DateTime?
+  teacherProfile     Teacher?
+  studentProfile     Student?
+  parentProfile      ParentAccount?
+  auditLogs          AuditLog[]      @relation("AuditActor")
+  notifications      Notification[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+}
+
+model Department {
+  id        String    @id @default(cuid())
+  name      String
+  code      String    @unique
+  courses   Course[]
+  subjects  Subject[]
+  students  Student[]
+  teachers  Teacher[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Course {
+  id           String     @id @default(cuid())
+  name         String
+  code         String     @unique
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+  semesters    Semester[]
+  students     Student[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Semester {
+  id        String    @id @default(cuid())
+  name      String
+  number    Int
+  courseId  String
+  course    Course    @relation(fields: [courseId], references: [id])
+  sections  Section[]
+  subjects  Subject[]
+  students  Student[]
+  subjectEnrollments StudentSubjectEnrollment[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Section {
+  id         String      @id @default(cuid())
+  name       String
+  semesterId String
+  semester   Semester    @relation(fields: [semesterId], references: [id])
+  subjects   Subject[]
+  students   Student[]
+  teachers   Teacher[]   @relation("SectionTeachers")
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+model Subject {
+  id           String       @id @default(cuid())
+  name         String
+  code         String       @unique
+  departmentId String
+  semesterId   String
+  sectionId    String
+  department   Department   @relation(fields: [departmentId], references: [id])
+  semester     Semester     @relation(fields: [semesterId], references: [id])
+  section      Section      @relation(fields: [sectionId], references: [id])
+  teachers     Teacher[]    @relation("TeacherSubjects")
+  attendance   Attendance[]
+  enrollments  StudentSubjectEnrollment[]
+  classSessions ClassSession[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model AcademicSession {
+  id        String   @id @default(cuid())
+  name      String
+  startsOn  DateTime
+  endsOn    DateTime
+  isActive  Boolean  @default(false)
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id])
+  classSessions ClassSession[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Teacher {
+  id           String       @id @default(cuid())
+  userId       String       @unique
+  user         User         @relation(fields: [userId], references: [id])
+  employeeCode String       @unique
+  designation  String?
+  institutionName String?
+  departmentId String
+  department   Department   @relation(fields: [departmentId], references: [id])
+  sections     Section[]    @relation("SectionTeachers")
+  subjects     Subject[]    @relation("TeacherSubjects")
+  attendance   Attendance[]
+  academicSessions AcademicSession[]
+  classSessions ClassSession[]
+  reports      GeneratedReport[]
+  backups      BackupSnapshot[]
+  leaveReviews LeaveRequest[] @relation("LeaveReviewer")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Student {
+  id                 String       @id @default(cuid())
+  userId             String       @unique
+  user               User         @relation(fields: [userId], references: [id])
+  rollNumber         String
+  registrationNumber String       @unique
+  departmentId       String
+  courseId           String
+  semesterId         String
+  sectionId          String
+  department         Department   @relation(fields: [departmentId], references: [id])
+  course             Course       @relation(fields: [courseId], references: [id])
+  semester           Semester     @relation(fields: [semesterId], references: [id])
+  section            Section      @relation(fields: [sectionId], references: [id])
+  attendance         Attendance[]
+  subjectEnrollments StudentSubjectEnrollment[]
+  leaveRequests      LeaveRequest[]
+  parents            ParentAccount[]
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@unique([rollNumber, sectionId])
+}
+
+model StudentSubjectEnrollment {
+  id         String   @id @default(cuid())
+  studentId  String
+  subjectId  String
+  semesterId String
+  student    Student  @relation(fields: [studentId], references: [id])
+  subject    Subject  @relation(fields: [subjectId], references: [id])
+  semester   Semester @relation(fields: [semesterId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@unique([studentId, subjectId])
+  @@index([subjectId, semesterId])
+}
+
+model ParentAccount {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  relation  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Attendance {
+  id           String           @id @default(cuid())
+  classSessionId String?
+  studentId    String
+  teacherId    String
+  subjectId    String
+  departmentId String
+  courseId     String
+  semesterId   String
+  sectionId    String
+  date         DateTime
+  status       AttendanceStatus
+  remark       String?
+  source       String           @default("MANUAL")
+  offlineSyncId String?         @unique
+  classSession ClassSession?     @relation(fields: [classSessionId], references: [id])
+  student      Student          @relation(fields: [studentId], references: [id])
+  teacher      Teacher          @relation(fields: [teacherId], references: [id])
+  subject      Subject          @relation(fields: [subjectId], references: [id])
+  auditLogs    AuditLog[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([studentId, subjectId, date])
+  @@index([teacherId, date])
+  @@index([sectionId, subjectId, date])
+}
+
+model ClassSession {
+  id                String      @id @default(cuid())
+  teacherId         String
+  academicSessionId String?
+  subjectId         String
+  departmentId      String
+  courseId          String
+  semesterId        String
+  sectionId         String
+  date              DateTime
+  classNumber       Int
+  topicTaught       String
+  durationMinutes   Int
+  status            String      @default("ATTENDANCE_PENDING")
+  teacher           Teacher     @relation(fields: [teacherId], references: [id])
+  academicSession   AcademicSession? @relation(fields: [academicSessionId], references: [id])
+  subject           Subject     @relation(fields: [subjectId], references: [id])
+  attendance        Attendance[]
+  diaryEntry        ClassDiaryEntry?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@unique([subjectId, date, classNumber])
+  @@index([teacherId, date])
+}
+
+model ClassDiaryEntry {
+  id              String       @id @default(cuid())
+  classSessionId  String       @unique
+  classSession    ClassSession @relation(fields: [classSessionId], references: [id])
+  topicTaught     String
+  assignmentGiven String?
+  notes           String?
+  observations    String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model GeneratedReport {
+  id          String       @id @default(cuid())
+  teacherId   String
+  teacher     Teacher      @relation(fields: [teacherId], references: [id])
+  type        ReportType
+  format      ReportFormat
+  title       String
+  filters     Json?
+  shareChannel String?
+  fileUrl     String?
+  generatedAt DateTime     @default(now())
+
+  @@index([teacherId, type])
+}
+
+model BackupSnapshot {
+  id          String       @id @default(cuid())
+  teacherId   String
+  teacher     Teacher      @relation(fields: [teacherId], references: [id])
+  target      BackupTarget
+  status      String       @default("COMPLETED")
+  fileUrl     String?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+
+  @@index([teacherId, target])
+}
+
+model LeaveRequest {
+  id           String      @id @default(cuid())
+  studentId    String
+  student      Student     @relation(fields: [studentId], references: [id])
+  startDate    DateTime
+  endDate      DateTime
+  reason       String
+  documentUrl  String?
+  status       LeaveStatus @default(PENDING)
+  reviewerId   String?
+  reviewer     Teacher?    @relation("LeaveReviewer", fields: [reviewerId], references: [id])
+  reviewedAt   DateTime?
+  reviewerNote String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  body      String
+  readAt    DateTime?
+  data      Json?
+  createdAt DateTime         @default(now())
+}
+
+model AuditLog {
+  id            String      @id @default(cuid())
+  entityType    String
+  entityId      String
+  attendanceId  String?
+  attendance    Attendance? @relation(fields: [attendanceId], references: [id])
+  previousValue Json?
+  updatedValue  Json?
+  updatedById   String
+  updatedBy     User        @relation("AuditActor", fields: [updatedById], references: [id])
+  reason        String?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime    @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model QrAttendanceSession {
+  id           String   @id @default(cuid())
+  tokenHash    String   @unique
+  teacherId    String
+  subjectId    String
+  sectionId    String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+}

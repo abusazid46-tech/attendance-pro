@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Attendance Pro",
+    "slug": "attendance-pro",
+    "scheme": "attendancepro",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Attendance Pro uses location to validate teacher geofence attendance."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#16a34a"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "https://brown-butterfly-424334.hostingersite.com/api/v1"
+    },
+    "android": {
+      "package": "com.aruz6.attendancepro"
+    }
+  }
+}
