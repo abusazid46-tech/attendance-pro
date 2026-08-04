@@ -12,17 +12,18 @@ class QrAttendanceController
     public function createSession(Request $request)
     {
         $data = $request->validate([
-            'teacherId' => ['required', 'string'],
+            'teacherId' => ['nullable', 'string'],
             'subjectId' => ['required', 'string'],
             'sectionId' => ['required', 'string'],
         ]);
 
+        $teacherId = $this->teacherId($request, $data['teacherId'] ?? null);
         $token = Str::random(48);
         $id = (string) Str::ulid();
         DB::table('qr_attendance_sessions')->insert([
             'id' => $id,
             'token_hash' => Hash::make($token),
-            'teacher_id' => $data['teacherId'],
+            'teacher_id' => $teacherId,
             'subject_id' => $data['subjectId'],
             'section_id' => $data['sectionId'],
             'expires_at' => now()->addMinutes(5),
@@ -37,7 +38,7 @@ class QrAttendanceController
         $data = $request->validate([
             'token' => ['required', 'string'],
             'studentId' => ['required', 'string'],
-            'teacherId' => ['required', 'string'],
+            'teacherId' => ['nullable', 'string'],
             'subjectId' => ['required', 'string'],
             'departmentId' => ['required', 'string'],
             'courseId' => ['required', 'string'],
@@ -45,6 +46,7 @@ class QrAttendanceController
             'sectionId' => ['required', 'string'],
         ]);
 
+        $teacherId = $this->teacherId($request, $data['teacherId'] ?? null);
         $sessions = DB::table('qr_attendance_sessions')->where('expires_at', '>', now())->get();
         $session = $sessions->first(fn ($item) => Hash::check($data['token'], $item->token_hash));
         if (!$session) {
@@ -56,7 +58,7 @@ class QrAttendanceController
             ['student_id' => $data['studentId'], 'subject_id' => $data['subjectId'], 'date' => now()->toDateString()],
             [
                 'id' => $id,
-                'teacher_id' => $data['teacherId'],
+                'teacher_id' => $teacherId,
                 'department_id' => $data['departmentId'],
                 'course_id' => $data['courseId'],
                 'semester_id' => $data['semesterId'],
@@ -69,5 +71,13 @@ class QrAttendanceController
         );
 
         return response()->json(['message' => 'QR attendance saved'], 201);
+    }
+
+    private function teacherId(Request $request, ?string $fallback = null): string
+    {
+        $auth = $request->attributes->get('auth');
+        $teacherId = DB::table('teachers')->where('user_id', $auth['sub'] ?? null)->value('id');
+
+        return $teacherId ?? $fallback ?? 'seed-teacher-1';
     }
 }

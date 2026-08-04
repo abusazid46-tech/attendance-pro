@@ -1,0 +1,16 @@
+*.apk
+node_modules/
+node_modules.*/
+.npm-cache/
+apps/mobile/
+apps/api/
+apps/laravel-api/
+apps/admin/node_modules/
+apps/admin/.next/
+apps/admin/tsconfig.tsbuildinfo
+docs/
+supabase/
+work*/
+work-*.cjs
+work-*.json
+*.log

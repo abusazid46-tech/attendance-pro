@@ -134,25 +134,48 @@ class AuthController
 
     public function forgotPassword(Request $request)
     {
-        $data = $request->validate(['email' => ['required', 'email']]);
-        $token = Str::random(48);
-        DB::table('users')->where('email', $data['email'])->update([
+        $data = $request->validate([
+            'email' => ['nullable', 'email'],
+            'mobileNumber' => ['nullable', 'string', 'min:7'],
+        ]);
+
+        if (empty($data['email']) && empty($data['mobileNumber'])) {
+            return response()->json(['message' => 'Email or mobile number is required'], 422);
+        }
+
+        $user = DB::table('users')
+            ->where(function ($query) use ($data) {
+                if (!empty($data['email'])) {
+                    $query->orWhere('email', strtolower($data['email']));
+                }
+                if (!empty($data['mobileNumber'])) {
+                    $query->orWhere('mobile_number', $data['mobileNumber']);
+                }
+            })
+            ->first();
+
+        if (!$user) {
+            return response()->json(['message' => 'No account found for these recovery details'], 404);
+        }
+
+        $token = (string) random_int(100000, 999999);
+        DB::table('users')->where('id', $user->id)->update([
             'password_reset_token' => $token,
             'reset_token_expiry' => now()->addMinutes(15),
             'updated_at' => now(),
         ]);
 
         return response()->json([
-            'message' => 'Password reset token generated. Wire this to email/SMS in production.',
-            'resetTokenPreview' => app()->environment('production') ? null : $token,
+            'message' => 'Recovery code generated. It is valid for 15 minutes.',
+            'recoveryCode' => $token,
         ]);
     }
 
     public function resetPassword(Request $request)
     {
         $data = $request->validate([
-            'token' => ['required', 'string', 'min:20'],
-            'password' => ['required', 'string', 'min:8'],
+            'token' => ['required', 'string', 'min:6'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
         $updated = DB::table('users')
@@ -168,6 +191,46 @@ class AuthController
         return $updated
             ? response()->json(['message' => 'Password reset successful'])
             : response()->json(['message' => 'Invalid or expired reset token'], 400);
+    }
+
+    public function uploadAvatar(Request $request)
+    {
+        $data = $request->validate([
+            'imageData' => ['required', 'string'],
+        ]);
+
+        $auth = $request->attributes->get('auth');
+        $userId = $auth['sub'] ?? null;
+        if (!$userId) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if (!preg_match('/^data:image\/(png|jpe?g|webp);base64,/', $data['imageData'], $match)) {
+            return response()->json(['message' => 'Avatar must be a PNG, JPG, or WEBP image'], 422);
+        }
+
+        $extension = $match[1] === 'jpeg' ? 'jpg' : $match[1];
+        $base64 = substr($data['imageData'], strpos($data['imageData'], ',') + 1);
+        $binary = base64_decode($base64, true);
+        if ($binary === false || strlen($binary) > 3 * 1024 * 1024) {
+            return response()->json(['message' => 'Avatar image is invalid or larger than 3 MB'], 422);
+        }
+
+        $directory = base_path('uploads/avatars');
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $filename = $userId.'-'.now()->format('YmdHis').'.'.$extension;
+        file_put_contents($directory.'/'.$filename, $binary);
+        $avatarUrl = url('uploads/avatars/'.$filename).'?v='.time();
+
+        DB::table('users')->where('id', $userId)->update([
+            'avatar_url' => $avatarUrl,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json(['avatarUrl' => $avatarUrl]);
     }
 
     private function issueSession(object $user, array $extra = []): array
@@ -189,6 +252,7 @@ class AuthController
                 'email' => $user->email,
                 'fullName' => $user->full_name,
                 'role' => $user->role_name,
+                'avatarUrl' => $user->avatar_url ?? null,
             ],
         ] + $extra;
     }

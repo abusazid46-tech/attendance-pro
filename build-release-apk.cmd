@@ -3,8 +3,9 @@ setlocal
 
 set "PROJECT_ROOT=%~dp0"
 if "%PROJECT_ROOT:~-1%"=="\" set "PROJECT_ROOT=%PROJECT_ROOT:~0,-1%"
-set "ANDROID_HOME=C:\Users\User\Documents\Codex\2026-05-29\act-as-a-senior-full-stack\.local-android-sdk"
+set "ANDROID_HOME=C:\Android"
 set "ANDROID_SDK_ROOT=%ANDROID_HOME%"
+set "EXPO_PUBLIC_API_URL=https://brown-butterfly-424334.hostingersite.com/api/v1"
 set "NODE_ENV=production"
 set "NODE_OPTIONS=--max-old-space-size=768 --dns-result-order=ipv4first"
 set "npm_config_jobs=1"
@@ -13,7 +14,7 @@ set "JAVA_TOOL_OPTIONS=-Dsun.zip.disableMemoryMapping=true"
 set "BUILD_LOG=%PROJECT_ROOT%\build-release-local-cmd.log"
 set "COPY_LOG=%PROJECT_ROOT%\build-stage-copy.log"
 set "INSTALL_LOG=%PROJECT_ROOT%\build-stage-install.log"
-set "STAGE_DIR=%USERPROFILE%\amsclean%RANDOM%"
+set "STAGE_DIR=%PROJECT_ROOT%\work-apk-build\amsclean%RANDOM%"
 set "GRADLE_USER_HOME=%USERPROFILE%\.gradle-ams-clean"
 
 if defined JAVA_HOME (

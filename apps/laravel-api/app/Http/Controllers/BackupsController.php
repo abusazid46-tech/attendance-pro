@@ -8,6 +8,26 @@ use Illuminate\Support\Str;
 
 class BackupsController
 {
+    public function index(Request $request)
+    {
+        $auth = $request->attributes->get('auth');
+        $teacherId = DB::table('teachers')->where('user_id', $auth['sub'] ?? null)->value('id') ?? 'seed-teacher-1';
+
+        $backups = DB::table('backup_snapshots')
+            ->where('teacher_id', $teacherId)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn ($item) => [
+                'id' => $item->id,
+                'target' => $item->target,
+                'date' => $item->created_at,
+                'size' => 'Recorded',
+                'status' => $item->status,
+            ]);
+
+        return response()->json(['backups' => $backups]);
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([

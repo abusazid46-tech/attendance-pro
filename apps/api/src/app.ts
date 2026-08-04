@@ -19,7 +19,9 @@ export const createApp = () => {
   app.use(morgan("combined"));
   app.use(rateLimit({ windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 900000), max: Number(process.env.RATE_LIMIT_MAX ?? 300) }));
 
-  app.get("/health", (_req, res) => res.json({ status: "ok", service: "attendance-api", time: new Date().toISOString() }));
+  const health = (_req: express.Request, res: express.Response) => res.json({ status: "ok", service: "attendance-api", time: new Date().toISOString() });
+  app.get("/health", health);
+  app.get("/api/v1/health", health);
 
   const spec = swaggerJsdoc({
     definition: {

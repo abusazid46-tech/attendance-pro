@@ -4,7 +4,7 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { ApiError, asyncHandler } from "../../lib/http.js";
 import { prisma } from "../../lib/prisma.js";
-import { hashToken, signAccessToken, signRefreshToken, userPayload, verifyPassword, verifyTokenHash } from "../../lib/security.js";
+import { hashPassword, hashToken, signAccessToken, signRefreshToken, userPayload, verifyPassword, verifyTokenHash } from "../../lib/security.js";
 import { validate } from "../../middleware/validate.js";
 
 export const authRouter = Router();
@@ -16,6 +16,22 @@ const loginSchema = z.object({
     password: z.string().min(8)
   })
 });
+const codeFromName = (value: string) =>
+  value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 12) || "DEPT";
+
+const sessionDates = (name?: string) => {
+  const match = name?.match(/(20\d{2})\D*(\d{2,4})?/);
+  const startYear = match ? Number(match[1]) : new Date().getFullYear();
+  const endYear = match?.[2] ? Number(match[2].length === 2 ? `20${match[2]}` : match[2]) : startYear + 1;
+  return {
+    startsOn: new Date(Date.UTC(startYear, 6, 1)),
+    endsOn: new Date(Date.UTC(endYear, 5, 30))
+  };
+};
 
 authRouter.post(
   "/login",
@@ -36,6 +52,74 @@ authRouter.post(
     await prisma.user.update({ where: { id: user.id }, data: { refreshTokenHash: await hashToken(refreshToken) } });
 
     res.json({ accessToken, refreshToken, user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role.name } });
+  })
+);
+
+authRouter.post(
+  "/register-teacher",
+  validate(
+    z.object({
+      body: z.object({
+        name: z.string().min(2),
+        designation: z.string().min(2).optional(),
+        department: z.string().min(2),
+        institutionName: z.string().min(2).optional(),
+        mobileNumber: z.string().min(7).optional(),
+        email: z.string().email(),
+        password: z.string().min(8),
+        employeeCode: z.string().min(2).optional(),
+        academicSession: z.string().min(4).optional()
+      })
+    })
+  ),
+  asyncHandler(async (req, res) => {
+    const role = await prisma.role.findUniqueOrThrow({ where: { name: "FACULTY" } });
+    const departmentCode = codeFromName(req.body.department);
+    const department = await prisma.department.upsert({
+      where: { code: departmentCode },
+      update: { name: req.body.department },
+      create: { name: req.body.department, code: departmentCode }
+    });
+    const teacher = await prisma.teacher.create({
+      data: {
+        employeeCode: req.body.employeeCode ?? `TCH-${Date.now()}`,
+        designation: req.body.designation,
+        institutionName: req.body.institutionName,
+        departmentId: department.id,
+        user: {
+          create: {
+            fullName: req.body.name,
+            email: req.body.email,
+            mobileNumber: req.body.mobileNumber,
+            passwordHash: await hashPassword(req.body.password),
+            roleId: role.id,
+            isActive: true
+          }
+        },
+        academicSessions: req.body.academicSession
+          ? {
+              create: {
+                name: req.body.academicSession,
+                ...sessionDates(req.body.academicSession),
+                isActive: true
+              }
+            }
+          : undefined
+      },
+      include: { user: { include: { role: true } }, department: true, academicSessions: true }
+    });
+
+    const payload = userPayload(teacher.user);
+    const accessToken = signAccessToken(payload);
+    const refreshToken = signRefreshToken(payload);
+    await prisma.user.update({ where: { id: teacher.userId }, data: { refreshTokenHash: await hashToken(refreshToken) } });
+
+    res.status(201).json({
+      accessToken,
+      refreshToken,
+      teacher,
+      user: { id: teacher.user.id, email: teacher.user.email, fullName: teacher.user.fullName, role: teacher.user.role.name }
+    });
   })
 );
 

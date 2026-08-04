@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "NODE_ENV": "production"
+        "EXPO_PUBLIC_API_URL": "https://brown-butterfly-424334.hostingersite.com/api/v1"
       }
     },
     "production": {
@@ -19,7 +19,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "NODE_ENV": "production"
+        "EXPO_PUBLIC_API_URL": "https://brown-butterfly-424334.hostingersite.com/api/v1"
       }
     }
   }

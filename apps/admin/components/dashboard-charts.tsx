@@ -34,17 +34,14 @@ export function SubjectBars({ data }: { data: { subject: string; attendance: num
   );
 }
 
-export function PresentAbsentPie() {
-  const data = [
-    { name: "Present", value: 78, fill: "#16a34a" },
-    { name: "Absent", value: 14, fill: "#dc2626" },
-    { name: "Late/Leave", value: 8, fill: "#f97316" }
-  ];
+export function PresentAbsentPie({ data = [] }: { data?: { name: string; value: number }[] }) {
+  const palette = ["#16a34a", "#dc2626", "#f97316", "#2563eb"];
+  const chartData = data.length ? data.map((item, index) => ({ ...item, fill: palette[index % palette.length] })) : [{ name: "No records", value: 1, fill: "#94a3b8" }];
   return (
     <ResponsiveContainer width="100%" height={260}>
       <PieChart>
         <Tooltip />
-        <Pie data={data} dataKey="value" nameKey="name" innerRadius={64} outerRadius={96} />
+        <Pie data={chartData} dataKey="value" nameKey="name" innerRadius={64} outerRadius={96} />
       </PieChart>
     </ResponsiveContainer>
   );

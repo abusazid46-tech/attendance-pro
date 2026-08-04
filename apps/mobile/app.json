@@ -1,37 +1,55 @@
 {
   "expo": {
-    "name": "Attendance Pro",
+    "name": "Smart Attendance App",
     "slug": "attendance-pro",
     "scheme": "attendancepro",
-    "version": "1.0.0",
+    "version": "1.0.9",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "plugins": [
       "expo-router",
       "expo-secure-store",
       "expo-sqlite",
       [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Attendance Pro uses location to validate teacher geofence attendance."
-        }
-      ],
-      [
         "expo-notifications",
         {
           "color": "#16a34a"
         }
-      ]
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#EEFFF4"
+        }
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "https://brown-butterfly-424334.hostingersite.com/api/v1"
+      "apiUrl": "https://brown-butterfly-424334.hostingersite.com/api/v1",
+      "router": {},
+      "eas": {
+        "projectId": "e29af57b-3aa8-41f9-9183-11b651d8ce9d"
+      }
     },
     "android": {
-      "package": "com.aruz6.attendancepro"
-    }
+      "package": "com.aruz6.attendancepro",
+      "versionCode": 15,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#16a34a"
+      },
+      "permissions": []
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "owner": "aruz6"
   }
 }

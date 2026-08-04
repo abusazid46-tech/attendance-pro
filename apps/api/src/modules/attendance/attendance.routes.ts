@@ -5,6 +5,7 @@ import { env } from "../../config/env.js";
 import { isInsideInstitutionBoundary } from "../../lib/geofence.js";
 import { ApiError, asyncHandler } from "../../lib/http.js";
 import { prisma } from "../../lib/prisma.js";
+import { hashPassword } from "../../lib/security.js";
 import { authenticate, allowRoles } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
 
@@ -34,6 +35,50 @@ const classSessionSchema = z.object({
   notes: z.string().optional(),
   observations: z.string().optional()
 });
+const studentInputSchema = z.object({
+  rollNumber: z.string().min(1),
+  name: z.string().min(2),
+  email: z.string().email().optional(),
+  departmentId: z.string().min(1),
+  courseId: z.string().min(1),
+  semesterId: z.string().min(1),
+  sectionId: z.string().min(1)
+});
+const generatedStudentEmail = (rollNumber: string, sectionId: string) =>
+  `student-${sectionId.slice(-6)}-${rollNumber}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-") + "@attendance.local";
+const saveStudent = async (input: z.infer<typeof studentInputSchema>) => {
+  const role = await prisma.role.findUniqueOrThrow({ where: { name: "STUDENT" } });
+  const email = input.email ?? generatedStudentEmail(input.rollNumber, input.sectionId);
+  const registrationNumber = `REG-${input.sectionId}-${input.rollNumber}`.replace(/[^A-Za-z0-9-]/g, "-");
+  return prisma.student.upsert({
+    where: { registrationNumber },
+    update: {
+      rollNumber: input.rollNumber,
+      departmentId: input.departmentId,
+      courseId: input.courseId,
+      semesterId: input.semesterId,
+      sectionId: input.sectionId,
+      user: { update: { fullName: input.name, email } }
+    },
+    create: {
+      rollNumber: input.rollNumber,
+      registrationNumber,
+      departmentId: input.departmentId,
+      courseId: input.courseId,
+      semesterId: input.semesterId,
+      sectionId: input.sectionId,
+      user: {
+        create: {
+          fullName: input.name,
+          email,
+          passwordHash: await hashPassword(`Student@${input.rollNumber}`),
+          roleId: role.id
+        }
+      }
+    },
+    include: { user: { select: { fullName: true, email: true } }, section: true }
+  });
+};
 
 attendanceRouter.get(
   "/students",
@@ -67,6 +112,36 @@ attendanceRouter.get(
       include: { user: { select: { fullName: true, email: true } }, section: true }
     });
     res.json({ students });
+  })
+);
+
+attendanceRouter.post(
+  "/students",
+  allowRoles("SUPER_ADMIN", "ADMIN", "FACULTY"),
+  validate(z.object({ body: studentInputSchema })),
+  asyncHandler(async (req, res) => {
+    const student = await saveStudent(req.body);
+    res.status(201).json({ student });
+  })
+);
+
+attendanceRouter.post(
+  "/students/bulk",
+  allowRoles("SUPER_ADMIN", "ADMIN", "FACULTY"),
+  validate(
+    z.object({
+      body: z.object({
+        departmentId: z.string().min(1),
+        courseId: z.string().min(1),
+        semesterId: z.string().min(1),
+        sectionId: z.string().min(1),
+        students: z.array(z.object({ rollNumber: z.string().min(1), name: z.string().min(2), email: z.string().email().optional() })).min(1)
+      })
+    })
+  ),
+  asyncHandler(async (req, res) => {
+    const students = await Promise.all(req.body.students.map((student: { rollNumber: string; name: string; email?: string }) => saveStudent({ ...student, departmentId: req.body.departmentId, courseId: req.body.courseId, semesterId: req.body.semesterId, sectionId: req.body.sectionId })));
+    res.status(201).json({ students, count: students.length });
   })
 );
 
@@ -148,7 +223,7 @@ attendanceRouter.post(
   ),
   asyncHandler(async (req, res) => {
     const { records, latitude, longitude, classSessionId, ...batch } = req.body;
-    if (!isInsideInstitutionBoundary({ latitude, longitude })) {
+    if ((latitude !== undefined || longitude !== undefined) && !isInsideInstitutionBoundary({ latitude, longitude })) {
       throw new ApiError(403, "Teacher is outside the configured institution boundary");
     }
     const saved = await prisma.$transaction(async (tx) => {

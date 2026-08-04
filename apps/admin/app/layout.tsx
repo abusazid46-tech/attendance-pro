@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import Link from "next/link";
-import { Bell, GraduationCap, LayoutDashboard, Users } from "lucide-react";
+import { cookies } from "next/headers";
+import { Bell, GraduationCap, LayoutDashboard, LogOut, Users } from "lucide-react";
+import { logoutAction } from "./actions";
+import { adminTokenCookie } from "@/lib/api";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Attendance Admin",
@@ -16,12 +16,15 @@ const nav = [
   { href: "/users", label: "Users", icon: Users },
   { href: "/academics", label: "Academics", icon: GraduationCap },
   { href: "/monitoring", label: "Monitoring", icon: Bell }
-];
+] as const;
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const hasAdminSession = Boolean((await cookies()).get(adminTokenCookie)?.value);
+
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body>
+        {hasAdminSession ? (
         <div className="min-h-screen">
           <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-border bg-white p-5 lg:block">
             <div className="mb-8 flex items-center gap-3">
@@ -39,9 +42,16 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 </Link>
               ))}
             </nav>
+            <form action={logoutAction} className="absolute bottom-5 left-5 right-5">
+              <button className="flex w-full items-center gap-3 rounded-md border border-border px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-50">
+                <LogOut className="h-4 w-4" />
+                Logout
+              </button>
+            </form>
           </aside>
           <main className="lg:pl-64">{children}</main>
         </div>
+        ) : children}
       </body>
     </html>
   );
