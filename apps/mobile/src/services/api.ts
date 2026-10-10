@@ -19,7 +19,7 @@ const backendErrorMessage = (data: any, fallback: string) => {
   return [data?.message, errors].filter(Boolean).join(": ") || fallback;
 };
 
-const refreshAccessToken = async () => {
+export const refreshAccessToken = async () => {
   const refreshToken = await tokenStorage.getRefreshToken();
   if (!refreshToken) return undefined;
 

@@ -5,6 +5,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { apiBackend } from "@/services/api-backend";
 import { useBackendDashboard, type AttendanceRecord, type Paper, type Student } from "@/services/app-data";
 import { saveAndShareReport } from "@/services/report-download";
+import { buildClientExcelReport } from "@/services/client-pdf";
 import { colors, spacing, thresholdColor } from "@/theme";
 
 const reportTypes = [
@@ -25,7 +26,7 @@ export default function ReportsScreen() {
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(monthStartDate());
   const [endDate, setEndDate] = useState(todayDate());
-  const [generatingFormat, setGeneratingFormat] = useState<"PDF" | "EXCEL" | undefined>();
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     if (!selectedSemesterId && masters.semesters[0]?.id) setSelectedSemesterId(masters.semesters[0].id);
@@ -58,7 +59,7 @@ export default function ReportsScreen() {
   const selectedStudents = reportStudents.filter((item) => selectedStudentIds.includes(item.id));
   const shareTargets = selectedStudents.length ? selectedStudents : defaulters;
 
-  const generate = async (format: "PDF" | "EXCEL") => {
+  const generateExcelReport = async () => {
     if (!semesterPapers.length) {
       Alert.alert("Paper required", "Add a paper before generating reports.");
       return;
@@ -68,28 +69,53 @@ export default function ReportsScreen() {
       return;
     }
     try {
-      setGeneratingFormat(format);
-      const reportFile = await apiBackend.generateReport({
-        type: reportTypeCode(selected),
-        format,
-        title: selected,
-        filters: {
-          subjectId: paper?.id,
-          subjectCode: paper?.code,
-          subjectName: paper?.name,
-          semesterId: selectedSemesterId,
-          semester: selectedSemester?.name ?? paper?.semester,
+      setGenerating(true);
+      let reportFile: { fileName: string; mimeType: string; encoding: string; contentBase64: string } | undefined;
+
+      if (online) {
+        try {
+          reportFile = await apiBackend.generateReport({
+            type: reportTypeCode(selected),
+            format: "EXCEL",
+            title: selected,
+            filters: {
+              subjectId: paper?.id,
+              subjectCode: paper?.code,
+              subjectName: paper?.name,
+              semesterId: selectedSemesterId,
+              semester: selectedSemester?.name ?? paper?.semester,
+              startDate,
+              endDate,
+              studentIds: selectedStudentIds
+            }
+          });
+        } catch {
+          // Backend did not respond or failed; seamless client fallback below
+        }
+      }
+
+      if (!reportFile) {
+        const clientOptions = {
+          title: selected,
+          type: reportTypeCode(selected),
+          paper,
+          semesterName: selectedSemester?.name ?? paper?.semester,
+          teacherName: data.teacherProfile?.name,
           startDate,
           endDate,
-          studentIds: selectedStudentIds
-        }
-      });
+          students: reportStudents,
+          records: filteredRecords,
+          classSessions: data.classSessions
+        };
+        reportFile = buildClientExcelReport(clientOptions);
+      }
+
       const saved = await saveAndShareReport(reportFile);
-      Alert.alert("Report downloaded", `${reportFile.fileName} saved and opened for sharing.\n${saved.uri}`);
+      Alert.alert("Report Ready", `${reportFile.fileName} is ready and opened for sharing or printing.\n${saved.uri}`);
     } catch (error) {
-      Alert.alert("Report failed", error instanceof Error ? error.message : "The backend did not generate this report.");
+      Alert.alert("Report failed", error instanceof Error ? error.message : "Could not generate this report.");
     } finally {
-      setGeneratingFormat(undefined);
+      setGenerating(false);
     }
   };
 
@@ -174,13 +200,9 @@ export default function ReportsScreen() {
         })}
 
         <View style={styles.buttonRow}>
-          <Pressable style={[styles.primaryButton, generatingFormat && styles.disabled]} onPress={() => generate("PDF")} disabled={Boolean(generatingFormat)}>
-            <Ionicons name="document" size={18} color="#fff" />
-            <Text style={styles.primaryText}>{generatingFormat === "PDF" ? "Generating..." : "PDF"}</Text>
-          </Pressable>
-          <Pressable style={[styles.secondaryButton, generatingFormat && styles.disabled]} onPress={() => generate("EXCEL")} disabled={Boolean(generatingFormat)}>
-            <Ionicons name="grid" size={18} color={colors.primaryDark} />
-            <Text style={styles.secondaryText}>{generatingFormat === "EXCEL" ? "Generating..." : "Excel / CSV"}</Text>
+          <Pressable style={[styles.primaryButton, generating && styles.disabled]} onPress={generateExcelReport} disabled={generating}>
+            <Ionicons name="grid-outline" size={18} color="#fff" />
+            <Text style={styles.primaryText}>{generating ? "Generating Excel Report..." : "Generate Excel Report"}</Text>
           </Pressable>
         </View>
 

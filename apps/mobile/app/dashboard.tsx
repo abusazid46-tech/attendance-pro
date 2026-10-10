@@ -80,9 +80,30 @@ export default function DashboardScreen() {
   const defaulters = filteredStudents.filter((item) => item.total > 0 && item.attendance < 75).length;
 
   const logout = async () => {
-    await tokenStorage.clear();
-    clearAuth();
-    router.replace("/login");
+    Alert.alert(
+      "Lock or Sign Out",
+      "Lock app to keep Fingerprint Quick Unlock ready, or perform a full sign out to remove account from this device.",
+      [
+        {
+          text: "Lock App (Keep Biometrics)",
+          onPress: async () => {
+            await tokenStorage.clearActiveSession();
+            clearAuth();
+            router.replace("/login");
+          }
+        },
+        {
+          text: "Full Sign Out (Remove)",
+          style: "destructive",
+          onPress: async () => {
+            await tokenStorage.clearAll();
+            clearAuth();
+            router.replace("/login");
+          }
+        },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
   };
 
   const changePhoto = async () => {

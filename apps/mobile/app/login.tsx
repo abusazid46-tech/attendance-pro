@@ -7,7 +7,8 @@ import { Controller, useForm } from "react-hook-form";
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { z } from "zod";
 import { apiBackend } from "@/services/api-backend";
-import { tokenStorage } from "@/services/token-storage";
+import { refreshAccessToken } from "@/services/api";
+import { tokenStorage, type SavedUserProfile } from "@/services/token-storage";
 import { useAuthStore } from "@/store/auth";
 import { colors, spacing } from "@/theme";
 
@@ -24,7 +25,9 @@ const schema = z.object({
 
 export default function LoginScreen() {
   const setSession = useAuthStore((state) => state.setSession);
-  const [storedToken, setStoredToken] = useState<string | null>(null);
+  const [hasSavedLogin, setHasSavedLogin] = useState(false);
+  const [savedUser, setSavedUser] = useState<SavedUserProfile | null>(null);
+  const [biometricReady, setBiometricReady] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoveryMobile, setRecoveryMobile] = useState("");
@@ -37,16 +40,53 @@ export default function LoginScreen() {
     defaultValues: { email: "", mobileNumber: "", password: "" }
   });
 
+  const checkBiometrics = async () => {
+    try {
+      const [accessToken, refreshToken, savedUserProfile, savedCreds, hasHardware, enrolled] = await Promise.all([
+        tokenStorage.getAccessToken(),
+        tokenStorage.getRefreshToken(),
+        tokenStorage.getSavedUser(),
+        tokenStorage.getSavedCredentials(),
+        LocalAuthentication.hasHardwareAsync(),
+        LocalAuthentication.isEnrolledAsync()
+      ]);
+
+      const hasAccount = Boolean(accessToken || refreshToken || savedUserProfile || savedCreds);
+      setHasSavedLogin(hasAccount);
+      setSavedUser(savedUserProfile);
+      setBiometricReady(Boolean(hasHardware && enrolled));
+    } catch {
+      setHasSavedLogin(false);
+      setBiometricReady(false);
+    }
+  };
+
   useEffect(() => {
-    tokenStorage.getAccessToken().then(setStoredToken).catch(() => setStoredToken(null));
+    checkBiometrics();
   }, []);
 
   const submit = handleSubmit(async (values) => {
     try {
       const data = await apiBackend.login(values);
       await tokenStorage.save(data.accessToken, data.refreshToken);
-      setSession(data.user, data.accessToken);
-      setStoredToken(data.accessToken);
+
+      const userProfile: SavedUserProfile = {
+        id: data.user?.id || "faculty",
+        email: data.user?.email || values.email || "",
+        fullName: data.user?.fullName || data.user?.name || "Faculty Teacher",
+        role: data.user?.role || "FACULTY",
+        mobileNumber: data.user?.mobileNumber || values.mobileNumber
+      };
+      await tokenStorage.saveUser(userProfile);
+      await tokenStorage.saveCredentials({
+        identifier: values.email?.trim() || values.mobileNumber?.trim() || "",
+        password: values.password
+      });
+
+      setSession(userProfile, data.accessToken);
+      setHasSavedLogin(true);
+      setSavedUser(userProfile);
+
       router.replace("/dashboard");
     } catch {
       Alert.alert("Login failed", "Check your email/mobile and password, or create a new faculty account.");
@@ -54,55 +94,98 @@ export default function LoginScreen() {
   });
 
   const quickUnlock = async () => {
-    if (!storedToken) {
-      Alert.alert("Login required", "Login once with password before using fingerprint quick unlock.");
-      return;
-    }
-
     try {
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!hasHardware || !enrolled) {
-        Alert.alert("Fingerprint unavailable", "No fingerprint or device biometric is enrolled on this phone.");
+
+      if (!hasHardware) {
+        Alert.alert("Biometrics Unavailable", "This device hardware does not support biometric sensors.");
+        return;
+      }
+      if (!enrolled) {
+        Alert.alert(
+          "Fingerprint Not Enrolled",
+          "No fingerprint or face biometric is enrolled on this phone. Please register your fingerprint in your phone's Settings > Security > Fingerprint."
+        );
         return;
       }
 
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: "Unlock Smart Attendance",
         cancelLabel: "Cancel",
-        fallbackLabel: "Use device passcode",
         disableDeviceFallback: false
       });
 
-      if (result.success) {
-        const accessToken = await tokenStorage.getAccessToken();
-        if (!accessToken) {
-          setStoredToken(null);
-          Alert.alert("Login required", "Your saved login expired. Login once with password to enable fingerprint again.");
+      if (!result.success) {
+        if (result.error === "user_cancel" || result.error === "system_cancel" || result.error === "app_cancel") {
           return;
         }
-        try {
-          const dashboard = await apiBackend.dashboard();
-          const profile = dashboard.teacherProfile ?? {};
-          setSession({
-            id: profile.userId ?? profile.id ?? profile.teacherId ?? "faculty",
-            email: profile.email ?? "",
-            fullName: profile.name ?? profile.fullName ?? "Faculty",
-            role: "FACULTY",
-            avatarUrl: profile.avatarUrl
-          }, accessToken);
-        } catch {
-          await tokenStorage.clear();
-          setStoredToken(null);
-          Alert.alert("Login expired", "Please login with password once. Fingerprint will work again after that.");
-          return;
-        }
-        router.replace("/dashboard");
-      } else {
-        Alert.alert("Unlock cancelled", "Fingerprint quick unlock was not completed.");
+        Alert.alert("Unlock Incomplete", "Biometric verification was not completed. You can also sign in with password.");
+        return;
       }
-    } catch {
-      Alert.alert("Fingerprint unavailable", "Biometric unlock is not available on this device.");
+
+      // Biometric authentication PASSED on device hardware!
+      let token: string | null | undefined = await tokenStorage.getAccessToken();
+      const userFromStorage = await tokenStorage.getSavedUser();
+      const savedCreds = await tokenStorage.getSavedCredentials();
+
+      // 1. If access token is missing or expired, attempt refresh
+      if (!token) {
+        token = await refreshAccessToken().catch(() => undefined);
+      }
+
+      // 2. If token is still missing/expired, attempt re-login using encrypted credentials
+      if (!token && savedCreds) {
+        try {
+          const isEmail = savedCreds.identifier.includes("@");
+          const loginData = await apiBackend.login({
+            email: isEmail ? savedCreds.identifier : undefined,
+            mobileNumber: !isEmail ? savedCreds.identifier : undefined,
+            password: savedCreds.password
+          });
+          if (loginData?.accessToken) {
+            token = loginData.accessToken;
+            await tokenStorage.save(loginData.accessToken, loginData.refreshToken);
+          }
+        } catch {
+          // Network offline; proceed with offline-capable session below
+        }
+      }
+
+      // 3. Resolve user profile (cached or default)
+      const activeUser: SavedUserProfile = userFromStorage ?? {
+        id: "faculty",
+        email: savedCreds?.identifier ?? "",
+        fullName: "Faculty Teacher",
+        role: "FACULTY"
+      };
+
+      // Set session into global store
+      setSession(activeUser, token || "offline-biometric-token");
+
+      // 4. Background refresh if token exists, NEVER wipe credentials on failure
+      if (token && token !== "offline-biometric-token") {
+        apiBackend.dashboard().then((dashboard) => {
+          const profile = dashboard?.teacherProfile;
+          if (profile) {
+            const updatedUser: SavedUserProfile = {
+              id: profile.userId ?? profile.id ?? profile.teacherId ?? activeUser.id,
+              email: profile.email ?? activeUser.email,
+              fullName: profile.name ?? profile.fullName ?? activeUser.fullName,
+              role: "FACULTY",
+              avatarUrl: profile.avatarUrl
+            };
+            setSession(updatedUser, token!);
+            tokenStorage.saveUser(updatedUser);
+          }
+        }).catch(() => {
+          // Harmless offline fallback: preserve session and local SQLite data
+        });
+      }
+
+      router.replace("/dashboard");
+    } catch (err) {
+      Alert.alert("Biometric Error", err instanceof Error ? err.message : "Biometric unlock could not start.");
     }
   };
 
@@ -162,10 +245,21 @@ export default function LoginScreen() {
       </View>
 
       <View style={styles.card}>
-        {storedToken ? (
-          <Pressable style={styles.quickButton} onPress={quickUnlock}>
-            <Ionicons name="finger-print" size={22} color={colors.primaryDark} />
-            <Text style={styles.quickButtonText}>Fingerprint / Quick Unlock</Text>
+        {hasSavedLogin ? (
+          <Pressable style={[styles.quickButton, !biometricReady && styles.quickButtonMuted]} onPress={quickUnlock}>
+            <Ionicons name="finger-print" size={24} color={colors.primaryDark} />
+            <View style={{ alignItems: "center" }}>
+              <Text style={styles.quickButtonText}>
+                {biometricReady
+                  ? savedUser?.fullName
+                    ? `Fingerprint Unlock (${savedUser.fullName})`
+                    : "Fingerprint / Quick Unlock"
+                  : "Enable Fingerprint in Phone Settings"}
+              </Text>
+              {biometricReady && savedUser?.email ? (
+                <Text style={{ fontSize: 11, color: colors.primaryDark, opacity: 0.8, fontWeight: "700" }}>{savedUser.email}</Text>
+              ) : null}
+            </View>
           </Pressable>
         ) : null}
         <Controller control={control} name="email" render={({ field }) => <TextInput style={styles.input} placeholder="Email" placeholderTextColor={colors.muted} autoCapitalize="none" keyboardType="email-address" value={field.value} onChangeText={field.onChange} />} />
@@ -178,7 +272,7 @@ export default function LoginScreen() {
         <Pressable style={styles.recoveryLink} onPress={() => setRecoveryOpen(true)}>
           <Text style={styles.recoveryLinkText}>Forgot password?</Text>
         </Pressable>
-        {!storedToken ? <Link href="/setup-wizard" style={styles.link}>Create Your Account</Link> : null}
+        {!hasSavedLogin ? <Link href="/setup-wizard" style={styles.link}>Create Your Account</Link> : null}
       </View>
       <Modal visible={recoveryOpen} animationType="slide" transparent onRequestClose={() => setRecoveryOpen(false)}>
         <View style={styles.modalBackdrop}>
@@ -218,6 +312,7 @@ const styles = StyleSheet.create({
   subtitle: { color: "#cbd5e1", fontWeight: "700", lineHeight: 22 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 18, padding: spacing.lg },
   quickButton: { minHeight: 52, borderRadius: 14, borderWidth: 1, borderColor: "#b7e4c7", backgroundColor: "#f0fdf4", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 14 },
+  quickButtonMuted: { backgroundColor: "#f8fafc", borderColor: colors.border },
   quickButtonText: { color: colors.primaryDark, fontWeight: "900" },
   input: { backgroundColor: "#f8fafc", borderWidth: 1, borderColor: colors.border, padding: 16, borderRadius: 12, marginBottom: 14, color: colors.text, fontWeight: "700" },
   button: { backgroundColor: colors.primary, padding: 16, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 8 },
